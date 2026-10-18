@@ -28,7 +28,6 @@ set_target_properties(dolphin-nogui PROPERTIES OUTPUT_NAME dolphin-emu-nogui)
 target_link_libraries(dolphin-nogui
 PUBLIC
   slippi_rust_extensions
-  z
 PRIVATE
   core
   uicommon
