@@ -1,0 +1,122 @@
+name: Bot-vs-Human Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - bot-vs-human
+    paths:
+      - .github/workflows/bot-vs-human-windows.yml
+      - .gitmodules
+      - CMakeLists.txt
+      - CMake/**
+      - Externals/**
+      - Source/**
+      - Data/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-vs-human-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    name: Windows x64 (GUI + NoGUI headless)
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out bot-vs-human with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Check that the fork's buffer donation code is present
+        shell: pwsh
+        run: |
+          $file = "Source/Core/Core/HW/EXI/EXI_DeviceSlippi.cpp"
+          $source = Get-Content -LiteralPath $file -Raw
+          if (-not $source.Contains("shouldRunAhead()") -or -not $source.Contains("is_bot")) {
+            throw "Bot run-ahead / buffer-donation logic missing from $file"
+          }
+
+      - name: Read pinned Rust toolchain
+        id: rust
+        shell: pwsh
+        run: |
+          $text = Get-Content Externals/SlippiRustExtensions/rust-toolchain.toml -Raw
+          if ($text -notmatch '(?m)^channel\s*=\s*"([^"]+)"') {
+            throw "Missing Rust toolchain channel"
+          }
+          "toolchain=$($Matches[1])" >> $env:GITHUB_OUTPUT
+
+      - name: Install pinned Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ steps.rust.outputs.toolchain }}
+          rustflags: ""
+
+      - name: Enable Visual Studio 2022 x64 compiler
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      # The NoGUI frontend compiles PlatformHeadless.cpp even with
+      # ENABLE_HEADLESS=OFF, so this one build produces BOTH frontends.
+      - name: Configure Slippi netplay (GUI and NoGUI)
+        shell: cmd
+        run: >
+          cmake -S . -B build-bvh-windows -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSLIPPI_PLAYBACK=OFF
+          -DENABLE_QT=ON
+          -DENABLE_NOGUI=ON
+          -DENABLE_HEADLESS=OFF
+          -DENABLE_AUTOUPDATE=OFF
+
+      - name: Build Slippi GUI and headless-capable NoGUI
+        shell: cmd
+        run: cmake --build build-bvh-windows --target dolphin-emu dolphin-nogui --parallel 4
+
+      - name: Validate and stage portable Windows files
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:GITHUB_WORKSPACE 'Binary\x64'
+          $gui = Join-Path $bin 'Slippi_Dolphin.exe'
+          $nogui = Join-Path $bin 'dolphin-emu-nogui.exe'
+          $rust = Join-Path $bin 'slippi_rust_extensions.dll'
+          foreach ($file in @($gui, $nogui, $rust)) {
+            if (!(Test-Path -LiteralPath $file -PathType Leaf)) {
+              Get-ChildItem -Path $bin -ErrorAction SilentlyContinue | Select-Object Name
+              throw "Expected Windows build output not found: $file"
+            }
+          }
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'bot-vs-human-windows-x64'
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+          Copy-Item -Path (Join-Path $bin '*') -Destination $dist -Recurse -Force
+          Copy-Item -Path 'Data\Sys' -Destination (Join-Path $dist 'Sys') -Recurse -Force
+          Copy-Item -LiteralPath 'COPYING' -Destination $dist
+          New-Item -ItemType File -Path (Join-Path $dist 'portable.txt') -Force | Out-Null
+          @(
+            'Slippi Bot-vs-Human Windows x64'
+            ''
+            'GUI: Slippi_Dolphin.exe'
+            'Headless: dolphin-emu-nogui.exe --platform=headless -e "C:\path\to\Melee.iso"'
+            'Use a writable Dolphin user folder with -u "C:\path\to\User" if needed.'
+            'Select Null video backend and disable audio in your Dolphin config for unattended use.'
+            ''
+            'This fork preserves bot run-ahead / buffer donation when matchmaking marks you as a bot.'
+            'Building does not cause matchmaking to classify an ordinary account as a bot.'
+            'This experimental build does not replace your official Slippi install.'
+          ) | Set-Content -LiteralPath (Join-Path $dist 'BOT-VS-HUMAN-README.txt') -Encoding UTF8
+
+      - name: Upload portable GUI + headless Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-vs-human-windows-x64
+          path: bot-vs-human-windows-x64/
+          if-no-files-found: error
+          retention-days: 30
