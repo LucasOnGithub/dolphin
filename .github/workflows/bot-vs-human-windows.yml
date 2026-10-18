@@ -97,7 +97,9 @@ jobs:
           $dist = Join-Path $env:GITHUB_WORKSPACE 'bot-vs-human-windows-x64'
           New-Item -ItemType Directory -Path $dist -Force | Out-Null
           Copy-Item -Path (Join-Path $bin '*') -Destination $dist -Recurse -Force
-          Copy-Item -Path 'Data\Sys' -Destination (Join-Path $dist 'Sys') -Recurse -Force
+          $sys = Join-Path $dist 'Sys'
+          New-Item -ItemType Directory -Path $sys -Force | Out-Null
+          Copy-Item -Path 'Data\Sys\*' -Destination $sys -Recurse -Force
           Copy-Item -LiteralPath 'COPYING' -Destination $dist
           New-Item -ItemType File -Path (Join-Path $dist 'portable.txt') -Force | Out-Null
           @(
