@@ -59,12 +59,32 @@ void InputBackend::PopulateDevices()
 {
 #ifdef _WIN32
   PIPE_FD pipes[4];
-  // Windows has named pipes, but they're different. They don't exist on the
-  //  local filesystem and are transient. So rather than searching the /Pipes
-  //  directory for pipes, we just always assume there's 4 and then make them
+  // The Twitch bot runs multiple Dolphin processes at once. Give each one
+  // its own named pipe devices when SLIPPI_PIPE_NAMESPACE is provided;
+  // otherwise preserve the normal slippibot1..4 behavior.
+  std::string pipe_namespace;
+  if (const char* env_namespace = std::getenv("SLIPPI_PIPE_NAMESPACE"))
+  {
+    pipe_namespace = env_namespace;
+    const bool valid = !pipe_namespace.empty() && pipe_namespace.size() <= 28 &&
+                       std::all_of(pipe_namespace.begin(), pipe_namespace.end(),
+                                   [](unsigned char c) {
+                                     return (c >= 'a' && c <= 'z') ||
+                                            (c >= 'A' && c <= 'Z') ||
+                                            (c >= '0' && c <= '9') || c == '_';
+                                   });
+    if (!valid)
+    {
+      WARN_LOG_FMT(SLIPPI, "Ignoring invalid SLIPPI_PIPE_NAMESPACE");
+      pipe_namespace.clear();
+    }
+  }
   for (uint32_t i = 0; i < 4; i++)
   {
-    std::string pipename = "\\\\.\\pipe\\slippibot" + std::to_string(i + 1);
+    const std::string ui_pipe_name =
+        pipe_namespace.empty() ? "slippibot" + std::to_string(i + 1)
+                               : "slippibot_" + pipe_namespace + "_" + std::to_string(i + 1);
+    std::string pipename = "\\\\.\\pipe\\" + ui_pipe_name;
     pipes[i] = CreateNamedPipeA(pipename.data(),               // pipe name
                                 PIPE_ACCESS_INBOUND,           // read access, inward only
                                 PIPE_TYPE_BYTE | PIPE_NOWAIT,  // byte mode, nonblocking
@@ -77,7 +97,6 @@ void InputBackend::PopulateDevices()
 
     // We're in nonblocking mode, so this won't wait for clients
     ConnectNamedPipe(pipes[i], NULL);
-    std::string ui_pipe_name = "slippibot" + std::to_string(i + 1);
     g_controller_interface.AddDevice(std::make_shared<PipeDevice>(pipes[i], ui_pipe_name));
   }
 #else
