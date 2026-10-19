@@ -187,7 +187,12 @@ s32 PipeDevice::readFromPipe(PIPE_FD file_descriptor, char* in_buffer, size_t si
 void waitForInput(PIPE_FD file_descriptor)
 {
 #ifdef _WIN32
-  // Not implemented yet.
+  // Avoid spinning at 100% CPU when a connected controller has not yet
+  // supplied input for this frame. Don't sleep if input is already queued.
+  DWORD available = 0;
+  if (!PeekNamedPipe(file_descriptor, nullptr, 0, nullptr, &available, nullptr) ||
+      available == 0)
+    Sleep(1);
 #else
   fd_set set;
   FD_ZERO(&set);
@@ -202,6 +207,18 @@ void waitForInput(PIPE_FD file_descriptor)
 Core::DeviceRemoval PipeDevice::UpdateInput()
 {
   bool wait_for_input = Config::Get(Config::SLIPPI_BLOCKING_PIPES) && g_need_input_for_frame;
+#ifdef _WIN32
+  // Windows creates four named-pipe devices whether or not the bot uses them.
+  // Unconnected pipes will NEVER send FLUSH: blocking on them deadlocks the
+  // game before libmelee finishes controller initialization (black screen).
+  // Only wait when a client has actually connected to this pipe.
+  if (wait_for_input)
+  {
+    DWORD available = 0;
+    wait_for_input =
+        PeekNamedPipe(m_fd, nullptr, 0, nullptr, &available, nullptr) != FALSE;
+  }
+#endif
   bool finished = false;
   do
   {
@@ -237,7 +254,16 @@ Core::DeviceRemoval PipeDevice::UpdateInput()
       newline = m_buf.find("\n");
     }
 
-    // In blocking mode, we continue until a FLUSH command is given.
+    // In blocking mode, continue until this connected client sends FLUSH.
+    // If it disconnects during the frame, do not trap emulation forever.
+#ifdef _WIN32
+    if (wait_for_input && !finished)
+    {
+      DWORD available = 0;
+      if (!PeekNamedPipe(m_fd, nullptr, 0, nullptr, &available, nullptr))
+        wait_for_input = false;
+    }
+#endif
   } while (wait_for_input && !finished);
 
   return Core::DeviceRemoval::Keep;
