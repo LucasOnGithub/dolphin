@@ -102,6 +102,9 @@ jobs:
           Copy-Item -Path 'Data\Sys\*' -Destination $sys -Recurse -Force
           Copy-Item -LiteralPath 'COPYING' -Destination $dist
           New-Item -ItemType File -Path (Join-Path $dist 'portable.txt') -Force | Out-Null
+          # Explicit capability marker; Twitch launcher must not assume old
+          # Dolphin binaries understand namespaced controller pipes.
+          'SLIPPI_PIPE_NAMESPACE=slippibot_{namespace}_{port}' | Set-Content -LiteralPath (Join-Path $dist 'TWITCH-NAMESPACED-PIPES.txt') -Encoding UTF8
           @(
             'Slippi Bot-vs-Human Windows x64'
             ''
