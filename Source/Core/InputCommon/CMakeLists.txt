@@ -167,6 +167,10 @@ if(LIBEVDEV_FOUND AND LIBUDEV_FOUND)
 endif()
 
 if(UNIX OR WIN32)
+  # ControllerInterface.cpp registers the pipe backend behind this macro.
+  # Merely compiling Pipes.cpp leaves the backend disabled, so libmelee
+  # cannot connect to slippibot1..4 on Windows (or FIFO pipes on Unix).
+  target_compile_definitions(inputcommon PRIVATE CIFACE_USE_PIPES)
   target_sources(inputcommon PRIVATE
     ControllerInterface/Pipes/Pipes.cpp
     ControllerInterface/Pipes/Pipes.h
